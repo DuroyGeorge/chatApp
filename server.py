@@ -6,9 +6,10 @@ import asyncio
 class Server:
 
     def __init__(self, server_socket) -> None:
-        self.connected = []
+        self.connected = set()
+        self.activeUser = {}
         self.server_socket = server_socket
-        self.serve_dict = {0: self.register, 1: self.login}
+        self.serve_dict = {0: self.register, 1: self.login, 3: self.privateChat}
 
     def read_file(self, file_path, data):
         with open(file_path, "r") as file:
@@ -17,8 +18,8 @@ class Server:
                     line.split()[0] == data["username"]
                     and line.split()[1] == data["password"]
                 ):
-                    return True
-            return False
+                    return data["username"]
+            return None
 
     def write_file(self, file_path, data):
         mark = True
@@ -27,10 +28,12 @@ class Server:
                 for line in file:
                     if line.split()[0] == data["username"]:
                         mark = False
-        finally:
+        except:
+            pass
+
+        if mark:
             with open(file_path, "a") as file:
                 file.write(data["username"] + " " + data["password"] + "\n")
-
         return mark
 
     async def register(self, data):
@@ -40,16 +43,20 @@ class Server:
                 executor, self.write_file, "UserName&PassWord", data
             )
 
-    async def login(self, data):
+    async def login(self, data, client_socket):
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as executor:
             return await loop.run_in_executor(
                 executor, self.read_file, "UserName&PassWord", data
             )
 
+    async def privateChat(self):
+        pass
+
     async def client_handler(self, client_socket, addr):
         print(f"Connected with {addr}")
-        self.connected.append(client_socket)
+        self.connected.add(client_socket)
+        username = ""
         try:
             while True:
                 data = await asyncio.get_event_loop().sock_recv(client_socket, 1024)
@@ -72,6 +79,8 @@ class Server:
                             client_socket, "登陆失败,帐号或密码错误！".encode()
                         )
                     else:
+                        username = res
+                        self.activeUser[username] = client_socket
                         await asyncio.get_event_loop().sock_sendall(
                             client_socket, "登录成功！".encode()
                         )
