@@ -1,40 +1,98 @@
-import socket
+import json
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
 
-# 设置服务器的IP地址和端口号
-# IP = "172.31.77.104"
-IP = "192.168.1.101"
-SERVER_PORT = 42310
-BUFFLEN = 4096
 
-# 创建socket对象
-serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+class Server:
 
-# 绑定到指定的IP地址和端口号
-serverSocket.bind((IP, SERVER_PORT))
+    connected = []
 
-# 开始监听传入的连接请求
-serverSocket.listen(1)
-print("服务器启动，等待客户端连接...")
+    def __init__(self, server_socket) -> None:
+        self.server_socket = server_socket
+        self.serve_dict = {0: self.register, 1: self.login}
 
-# 接受一个连接请求
-clientSocket, addr = serverSocket.accept()
-print(f"连接已建立，客户端地址：{addr}")
+    def read_file(self, file_path, data):
+        with open(file_path, "r") as file:
+            for line in file:
+                if (
+                    line.split()[0] == data["username"]
+                    and line.split()[1] == data["password"]
+                ):
+                    return True
+            return False
 
-# 发送登录成功的消息
-clientSocket.send("登录成功!".encode())
+    def write_file(self, file_path, data):
+        mark = True
+        try:
+            with open(file_path, "r") as file:
+                for line in file:
+                    if line.split()[0] == data["username"]:
+                        mark = False
+        finally:
+            with open(file_path, "a") as file:
+                file.write(data["username"] + " " + data["password"] + "\n")
 
-# 进入通信阶段
-while True:
-    # 接收客户端的数据
-    data = clientSocket.recv(BUFFLEN)
-    if not data:
-        break  # 如果没有数据，退出循环
-    # 打印接收到的数据
-    print(f"收到来自 {addr} 的消息: {data.decode()}")
-    # 发送回响应
-    clientSocket.send(f"回声: {data.decode()}".encode())
+        return mark
 
-# 关闭连接
-clientSocket.close()
-serverSocket.close()
-print("服务器已关闭。")
+    async def register(self, data):
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            return await loop.run_in_executor(
+                executor, self.write_file, "UserName&PassWord", data
+            )
+
+    async def login(self, data):
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            return await loop.run_in_executor(
+                executor, self.read_file, "UserName&PassWord", data
+            )
+
+    async def client_handler(self, client_socket, addr):
+        print(f"Connected with {addr}")
+        self.connected.append(client_socket)
+        try:
+            while True:
+                data = await asyncio.get_event_loop().sock_recv(client_socket, 1024)
+                if not data:
+                    break
+                data = json.loads(data)
+                res = await self.serve_dict.get(data["code"], lambda: None)(data)
+                if data["code"] == 0:
+                    if not res:
+                        await asyncio.get_event_loop().sock_sendall(
+                            client_socket, "注册失败，账号已存在！".encode()
+                        )
+                    else:
+                        await asyncio.get_event_loop().sock_sendall(
+                            client_socket, "注册成功！".encode()
+                        )
+                elif data["code"] == 1:
+                    if not res:
+                        await asyncio.get_event_loop().sock_sendall(
+                            client_socket, "登陆失败,帐号或密码错误！".encode()
+                        )
+                    else:
+                        await asyncio.get_event_loop().sock_sendall(
+                            client_socket, "登录成功！".encode()
+                        )
+        except Exception as e:
+            print("Error with client:", e)
+        finally:
+            self.connected.remove(client_socket)
+            client_socket.close()
+            print(f"Disconnected {addr}")
+
+    async def serve(self):
+        try:
+            while True:
+                client_socket, addr = await asyncio.get_event_loop().sock_accept(
+                    self.server_socket
+                )
+                asyncio.create_task(self.client_handler(client_socket, addr))
+        finally:
+            self.server_socket.close()
+
+    def run(self):
+        print(f"Server is running...{self.server_socket.getsockname()}")
+        asyncio.run(self.serve())
