@@ -1,7 +1,7 @@
 from socket import *
 
-IP = "111.18.34.146"
-SERVER_PORT = 42310
+IP = "192.168.1.101"
+SERVER_PORT = 8765
 BUFFLEN = 4096
 
 dataSocket = socket(AF_INET, SOCK_STREAM)
