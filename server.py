@@ -5,9 +5,8 @@ import asyncio
 
 class Server:
 
-    connected = []
-
     def __init__(self, server_socket) -> None:
+        self.connected = []
         self.server_socket = server_socket
         self.serve_dict = {0: self.register, 1: self.login}
 
