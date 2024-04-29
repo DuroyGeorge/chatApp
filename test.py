@@ -19,13 +19,15 @@ def read_file(file_path, data):
 
 
 def write_file(file_path, data):
-    with open(file_path, "r") as file:
-        for line in file:
-            if line.split()[0] == data["username"]:
-                return False
-    with open(file_path, "a") as file:
-        file.write(data["username"] + " " + data["password"] + "\n")
-        return True
+    try:
+        with open(file_path, "r") as file:
+            for line in file:
+                if line.split()[0] == data["username"]:
+                    return False
+    finally:
+        with open(file_path, "a") as file:
+            file.write(data["username"] + " " + data["password"] + "\n")
+            return True
 
 
 async def register(data):
