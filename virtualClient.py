@@ -8,6 +8,8 @@ def client():
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((host, port))
+        response = s.recv(1024).decode()
+        print("> recv:", response)
 
         # 获取用户名和密码
         username = input("Username: ")
