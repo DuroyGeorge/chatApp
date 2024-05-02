@@ -1,27 +1,10 @@
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import datetime
 
+# 获取当前的日期和时间
+now = datetime.datetime.now()
 
-def read_file(file_path):
-    with open(file_path, "r") as file:
-        return file.read()
+# 格式化时间为年-月-日 时:分
+formatted_time = now.strftime("%m-%d %H:%M")
 
-
-def write_file(file_path, data):
-    with open(file_path, "w") as file:
-        file.write(data)
-
-
-async def main():
-    loop = asyncio.get_running_loop()
-    with ThreadPoolExecutor() as executor:
-        # 异步写文件
-        await loop.run_in_executor(
-            executor, write_file, "example.txt", "Hello, ThreadPoolExecutor!"
-        )
-        # 异步读文件
-        content = await loop.run_in_executor(executor, read_file, "example.txt")
-        print(content)
-
-
-asyncio.run(main())
+# 打印格式化后的时间
+print("Current time (up to the minute):", formatted_time)

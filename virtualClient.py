@@ -3,7 +3,7 @@ import json
 
 
 def client():
-    host = "127.0.0.1"
+    host = "121.199.165.158"
     port = 8765
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
