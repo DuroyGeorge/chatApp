@@ -78,7 +78,7 @@ class Server:
         else:
             return {"code": False, "sege_num": sege_num}
 
-    async def transferFile(self, data, username, fileTrans):
+    async def transferFile(self, data, fileTrans):
         temp = hashlib.sha256()
         temp.update(data["fromUser"] + data["toUser"] + data["fileName"] + data["hash"])
         hash = temp.hexdigest()
@@ -87,25 +87,35 @@ class Server:
             sege_num = fileTrans[hash]
         else:
             fileTrans[hash] = sege_num
-        if data["onLine"]:
-            pass
-        else:
-            pass
+        try:
+            async with aiofiles.open(f"./files/{hash}", "a") as f:
+                await f.write(data["data"])
+        except:
+            async with aiofiles.open(f"./files/{hash}", "w") as f:
+                await f.write(data["data"])
+        if data["toUser"] in self.nameTosocket:
+            res = {
+                "sege_num": sege_num,
+                "fromUser": data["fromUser"],
+                "toUser": data["toUser"],
+                "fileName": data["fileName"],
+                "hash": hash,
+                "data": data["data"],
+            }
+            await asyncio.get_event_loop().sock_sendall(
+                self.nameTosocket[data["toUser"]], Format(res).toBytes()
+            )
 
     async def receive(self, client_socket, addr, username):
         data = await asyncio.get_event_loop().sock_recv(client_socket, 4)
         if not data:
             # 异常失联
-            self.nameTosocket.pop(username, None)
-            client_socket.close()
-            print(f"Disconnected {addr}")
+            return data
         length = int.from_bytes(data, "big")
         data = await asyncio.get_event_loop().sock_recv(client_socket, length)
         if not data:
             # 异常失联
-            self.nameTosocket.pop(username, None)
-            client_socket.close()
-            print(f"Disconnected {addr}")
+            return data
         return json.loads(data)
 
     async def client_handler(self, client_socket, addr):
@@ -115,6 +125,8 @@ class Server:
         try:
             while True:
                 data = self.receive(client_socket, addr, username)
+                if not data:
+                    break
                 res = await self.serve_dict.get(data["code"], lambda: None)(data)
                 res_dict = {}
                 if data["code"] == 0:
@@ -166,10 +178,11 @@ class Server:
                             self.nameTosocket[username], Format(res_dict).toBytes()
                         )
                 elif data["code"] == 5:
-                    await self.transferFile(data, username, fileTrans)
+                    await self.transferFile(data, fileTrans)
 
         except Exception as e:
             print("Error with client:", e)
+            # 检查是否有异常失联
         finally:
             self.nameTosocket.pop(username, None)
             client_socket.close()

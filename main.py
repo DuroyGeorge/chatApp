@@ -1,4 +1,4 @@
-import Server
+from Server import Server
 import socket
 
 
@@ -7,7 +7,7 @@ def main():
     server_socket.bind(("localhost", 8765))
     server_socket.listen()
     server_socket.setblocking(False)
-    Server.Server(server_socket).run()
+    Server(server_socket).run()
 
 
 if __name__ == "__main__":
