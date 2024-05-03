@@ -1,5 +1,8 @@
+__*
 UserName&PassWord
 compFileTable
 receiveFileTable
 postFileTable
 files
+t.py
+virtualClient.py

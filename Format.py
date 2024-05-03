@@ -4,7 +4,7 @@ import json
 class Format:
     def __init__(self, data) -> None:
         self.data = data
-        self.length = len(json.loads(data))
+        self.length = len(json.dumps(data))
 
     @classmethod
     def fromBytes(cls, jsonData):

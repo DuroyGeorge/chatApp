@@ -1,4 +1,3 @@
-from asyncio.streams import _ClientConnectedCallback
 import hashlib
 import json
 from FileManager import FileManager
@@ -222,7 +221,7 @@ class Server:
         hashtoInfo = {}
         try:
             while True:
-                data = self.receive(client_socket)
+                data = await self.receive(client_socket)
                 if not data:
                     break
                 res = await self.serve_dict.get(data["code"], lambda: None)(data)
@@ -379,7 +378,7 @@ class Server:
                 client_socket, addr = await asyncio.get_event_loop().sock_accept(
                     self.server_socket
                 )
-                temp_dict = {"message": "与服务器连接成功！"}
+                temp_dict = {"code": 0}
                 await asyncio.get_event_loop().sock_sendall(
                     client_socket, Format(temp_dict).toBytes()
                 )
