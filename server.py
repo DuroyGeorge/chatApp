@@ -1,6 +1,7 @@
+from asyncio.streams import _ClientConnectedCallback
 import hashlib
 import json
-from concurrent.futures import ThreadPoolExecutor
+from FileManager import FileManager
 from Format import Format
 import asyncio
 import aiofiles
@@ -12,22 +13,26 @@ class Server:
         self.nameTosocket = {}
         self.socketToname = {}
         self.server_socket = server_socket
+        self.fileManager = FileManager()
         self.serve_dict = {
-            0: self.register,
-            1: self.login,
-            2: self.privateChat,
-            # 3: self.publicChat,
-            4: self.transQues,
-            # 5: self.transferFile
+            1: self.register,
+            2: self.login,
+            3: self.privateChat,
+            # 4: self.publicChat,
+            5: self.transQues,
+            # 6: self.onFileTrans
+            # 7: self.offFileTrans
         }
 
     async def read_file(self, file_path, data):
-        async with aiofiles.open(file_path, mode="r") as file:
-            async for line in file:
-                username, password = line.strip().split()
-                if username == data["username"] and password == data["password"]:
-                    return True
-                return False
+        lock = await self.fileManager.get_lock(file_path)
+        async with lock:
+            async with aiofiles.open(file_path, mode="r") as file:
+                async for line in file:
+                    username, password = line.strip().split()
+                    if username == data["username"] and password == data["password"]:
+                        return True
+                    return False
 
     async def write_file(self, file_path, data):
         mark = True
@@ -36,11 +41,12 @@ class Server:
                 async for line in file:
                     if line.split()[0] == data["username"]:
                         mark = False
-        except:
-            pass
+        except Exception as e:
+            print(e)
 
         if mark:
-            async with asyncio.Lock():
+            lock = await self.fileManager.get_lock(file_path)
+            async with lock:
                 async with aiofiles.open(file_path, "a") as file:
                     await file.write(data["username"] + " " + data["password"] + "\n")
         return mark
@@ -57,10 +63,12 @@ class Server:
         else:
             return None
 
-    async def transQues(self, data):
+    async def transQues(self, data, receiveFile):
         sege_num = 0
-        try:
-            async with aiofiles.open("files", "r") as f:
+        if data["toUser"] in self.nameTosocket:
+            return {"code": True, "sege_num": sege_num}
+        else:
+            async with aiofiles.open("receiveFileTable", "r") as f:
                 async for line in f:
                     line_sp = line.split()
                     if (
@@ -69,44 +77,132 @@ class Server:
                         and line_sp[2] == data["fileName"]
                         and line_sp[3] == data["hash"]
                     ):
-                        sege_num = line_sp[4]
-        except:
-            async with aiofiles.open("files", "a") as f:
-                pass
-        if data["toUser"] in self.nameTosocket:
-            return {"code": True, "sege_num": sege_num}
-        else:
+                        sege_num = int(line_sp[4])
+            temp = hashlib.sha256()
+            temp.update(
+                (
+                    data["fromUser"] + data["toUser"] + data["fileName"] + data["hash"]
+                ).encode()
+            )
+            hash = temp.hexdigest()
+            receiveFile[hash] = sege_num
             return {"code": False, "sege_num": sege_num}
 
-    async def transferFile(self, data, fileTrans):
-        temp = hashlib.sha256()
-        temp.update(data["fromUser"] + data["toUser"] + data["fileName"] + data["hash"])
-        hash = temp.hexdigest()
-        sege_num = 0
-        if hash in fileTrans:
-            sege_num = fileTrans[hash]
-        else:
-            fileTrans[hash] = sege_num
+    async def onFileTrans(self, data, body):
+        # 在线
         try:
-            async with aiofiles.open(f"./files/{hash}", "a") as f:
-                await f.write(data["data"])
-        except:
-            async with aiofiles.open(f"./files/{hash}", "w") as f:
-                await f.write(data["data"])
-        if data["toUser"] in self.nameTosocket:
-            res = {
-                "sege_num": sege_num,
-                "fromUser": data["fromUser"],
-                "toUser": data["toUser"],
-                "fileName": data["fileName"],
-                "hash": hash,
-                "data": data["data"],
-            }
             await asyncio.get_event_loop().sock_sendall(
-                self.nameTosocket[data["toUser"]], Format(res).toBytes()
+                self.nameTosocket[data["toUser"]], Format(data).toBytes() + body
             )
+        except:
+            # 接收方掉线
+            try:
+                temp = {"code": 61}
+                await asyncio.get_event_loop().sock_sendall(
+                    self.nameTosocket[data["fromUser"]], Format(temp).toBytes()
+                )
+            except:
+                # 发送方掉线
+                temp = {"code": 61}
+                await asyncio.get_event_loop().sock_sendall(
+                    self.nameTosocket[data["toUser"]], Format(temp).toBytes()
+                )
+                raise
+        try:
+            # 成功发送
+            temp = {"code": 60}
+            await asyncio.get_event_loop().sock_sendall(
+                self.nameTosocket[data["fromUser"]], Format(temp).toBytes()
+            )
+        except:
+            # 发送方掉线
+            temp = {"code": 61}
+            await asyncio.get_event_loop().sock_sendall(
+                self.nameTosocket[data["toUser"]], Format(temp).toBytes()
+            )
+            raise
 
-    async def receive(self, client_socket, addr, username):
+    async def offFileTrans(self, data, receiveFile, body):
+        temp = hashlib.sha256()
+        temp.update(
+            (
+                data["fromUser"] + data["toUser"] + data["fileName"] + data["hash"]
+            ).encode()
+        )
+        hash = temp.hexdigest()
+        try:
+            async with aiofiles.open(f"./files/{hash}", "ab") as f:
+                await f.write(body)
+        except:
+            async with aiofiles.open(f"./files/{hash}", "wb") as f:
+                await f.write(body)
+        receiveFile[hash] += 1
+        try:
+            # 成功发送
+            temp = {"code": 70}
+            await asyncio.get_event_loop().sock_sendall(
+                self.nameTosocket[data["fromUser"]], Format(temp).toBytes()
+            )
+        except:
+            mark = False
+            lock = await self.fileManager.get_lock("receiveFileTable")
+            async with lock:
+                async with aiofiles.open("receiveFileTable", "r") as f:
+                    lines = await f.readlines()
+                    modi_lines = []
+                    for line in lines:
+                        line_sp = line.split()
+                        if (
+                            line_sp[0] == data["fromUser"]
+                            and line_sp[1] == data["toUser"]
+                            and line_sp[2] == data["filename"]
+                            and line_sp[3] == data["hash"]
+                        ):
+                            line_sp[4] = str(receiveFile[hash])
+                            mark = True
+                        modi_lines.append(" ".join(line_sp))
+                async with aiofiles.open("receiveFileTable", "w") as f:
+                    await f.writelines(modi_lines)
+                if not mark:
+                    async with aiofiles.open("receiveFileTable", "a") as f:
+                        await f.write(
+                            (
+                                " ".join(
+                                    [
+                                        data["fromUser"],
+                                        data["toUser"],
+                                        data["fileName"],
+                                        data["hash"],
+                                        str(receiveFile[hash]),
+                                    ]
+                                )
+                            )
+                            + "\n"
+                        )
+                raise
+
+    async def transferFile(self, hash, sege_num, client_socket, info):
+        lock = await self.fileManager.get_lock(f"./files/{hash}")
+        async with lock:
+            async with aiofiles.open(f"./files/{hash}", "rb") as f:
+                await f.seek(sege_num * 16 * 1024)
+                while True:
+                    data = await f.read(16 * 1024)
+                    if not data:
+                        break
+                    try:
+                        temp = {"code": 70, "length": len(data)} | info
+                        if len(data) < 16 * 1024:
+                            temp["complete"] = True
+                        else:
+                            temp["complete"] = False
+                        await asyncio.get_event_loop().sock_sendall(
+                            client_socket, Format(temp).toBytes() + data
+                        )
+                    except:
+                        raise
+
+    async def receive(self, client_socket):
         data = await asyncio.get_event_loop().sock_recv(client_socket, 4)
         if not data:
             # 异常失联
@@ -121,68 +217,157 @@ class Server:
     async def client_handler(self, client_socket, addr):
         print(f"Connected with {addr}")
         username = self.socketToname.get(client_socket, "")
-        fileTrans = {}
+        receiveFile = {}
+        postFile = {}
+        hashtoInfo = {}
         try:
             while True:
-                data = self.receive(client_socket, addr, username)
+                data = self.receive(client_socket)
                 if not data:
                     break
                 res = await self.serve_dict.get(data["code"], lambda: None)(data)
                 res_dict = {}
-                if data["code"] == 0:
+                if data["code"] == 1:
                     if not res:
-                        res_dict["message"] = "注册失败，账号已存在！"
+                        res_dict["code"] = 11
                     else:
-                        res_dict["message"] = "注册成功！"
-                    await asyncio.get_event_loop().sock_sendall(
-                        client_socket, Format(res_dict).toBytes()
-                    )
-                elif data["code"] == 1:
-                    if not res:
-                        res_dict["message"] = "登陆失败,帐号或密码错误！"
-                    else:
-                        username = res
-                        self.nameTosocket[username] = client_socket
-                        self.socketToname[client_socket] = username
-                        res_dict["message"] = "登录成功！"
+                        res_dict["code"] = 10
                     await asyncio.get_event_loop().sock_sendall(
                         client_socket, Format(res_dict).toBytes()
                     )
                 elif data["code"] == 2:
                     if not res:
-                        res_dict["message"] = "对方不在线！"
+                        res_dict["code"] = 21
                     else:
+                        username = res
+                        self.nameTosocket[username] = client_socket
+                        self.socketToname[client_socket] = username
+                        res_dict["code"] = 20
+                    await asyncio.get_event_loop().sock_sendall(
+                        client_socket, Format(res_dict).toBytes()
+                    )
+                    # 检查离线文件
+                    lock = await self.fileManager.get_lock("compFileTable")
+                    offFileHash = []
+                    async with lock:
+                        async with aiofiles.open("compFileTable", "r+") as f:
+                            async for line in f:
+                                line_sp = line.split()
+                                if line_sp[1] == username:
+                                    temp = hashlib.sha256()
+                                    temp.update(
+                                        (
+                                            line_sp[0]
+                                            + line_sp[1]
+                                            + line_sp[2]
+                                            + line_sp[3]
+                                        ).encode()
+                                    )
+                                    hash = temp.hexdigest()
+                                    offFileHash.append(hash)
+                                    hashtoInfo[hash] = {
+                                        "fromUser": line_sp[0],
+                                        "toUser": line_sp[1],
+                                        "fileName": line_sp[2],
+                                        "hash": line_sp[3],
+                                    }
+                    if not offFileHash:
+                        temp = {"code": 72, "offFileHash": offFileHash}
+                        await asyncio.get_event_loop().sock_sendall(
+                            client_socket, Format(temp).toBytes()
+                        )
+                elif data["code"] == 3:
+                    if not res:
+                        res_dict["code"] = 31
+                    else:
+                        res_dict["code"] = 30
                         res_dict["message"] = data["message"]
                     await asyncio.get_event_loop().sock_sendall(
                         client_socket, Format(res_dict).toBytes()
                     )
-                elif data["code"] == 3:
+                elif data["code"] == 4:
+                    res_dict["code"] = 40
                     res_dict["message"] = data["message"]
                     for user in self.nameTosocket:
                         await asyncio.get_event_loop().sock_sendall(
                             self.nameTosocket[user], Format(res_dict).toBytes()
                         )
-                elif data["code"] == 4:
+                elif data["code"] == 5:
                     if not res["code"]:
-                        # 文件转为离线发送
-                        res_dict["message"] = "是否愿意离线发送？"
-                        res_dict["seg_num"] = res["sege_num"]
-                        await asyncio.get_event_loop().sock_sendall(
-                            self.nameTosocket[username], Format(res_dict).toBytes()
-                        )
+                        # 文件离线发送
+                        res_dict["code"] = 51
                     else:
                         # 文件在线发送
-                        res_dict["message"] = "文件正在发送！"
-                        res_dict["seg_num"] = res["sege_num"]
-                        await asyncio.get_event_loop().sock_sendall(
-                            self.nameTosocket[username], Format(res_dict).toBytes()
+                        res_dict["code"] = 50
+                    res_dict["seg_num"] = res["sege_num"]
+                    await asyncio.get_event_loop().sock_sendall(
+                        self.nameTosocket[username], Format(res_dict).toBytes()
+                    )
+                elif data["code"] == 6:
+                    body = await asyncio.get_event_loop().sock_recv(
+                        client_socket, data["length"]
+                    )
+                    await self.onFileTrans(data, body)
+                elif data["code"] == 7:
+                    body = await asyncio.get_event_loop().sock_recv(
+                        client_socket, data["length"]
+                    )
+                    await self.offFileTrans(data, receiveFile, body)
+                    if data["complete"]:
+                        temp = hashlib.sha256()
+                        temp.update(
+                            (
+                                data["fromUser"]
+                                + data["toUser"]
+                                + data["fileName"]
+                                + data["hash"]
+                            ).encode()
                         )
-                elif data["code"] == 5:
-                    await self.transferFile(data, fileTrans)
-
+                        hash = temp.hexdigest()
+                        lock = await self.fileManager.get_lock("compFileTable")
+                        async with lock:
+                            async with aiofiles.open("compFileTable", "a") as f:
+                                await f.write(
+                                    (
+                                        " ".join(
+                                            [
+                                                data["fromUser"],
+                                                data["toUser"],
+                                                data["fileName"],
+                                                data["hash"],
+                                            ]
+                                        )
+                                    )
+                                    + "\n"
+                                )
+                        receiveFile.pop(hash)
+                        lock = await self.fileManager.get_lock("receiveFileTable")
+                        async with lock:
+                            async with aiofiles.open("receiveFileTable", "r") as f:
+                                lines = await f.readlines()
+                                modi_lines = []
+                                for line in lines:
+                                    line_sp = line.split()
+                                    if (
+                                        line_sp[0] == data["fromUser"]
+                                        and line_sp[1] == data["toUser"]
+                                        and line_sp[2] == data["filename"]
+                                        and line_sp[3] == data["hash"]
+                                    ):
+                                        continue
+                                    modi_lines.append(" ".join(line_sp))
+                            async with aiofiles.open("receiveFileTable", "w") as f:
+                                await f.writelines(modi_lines)
+                elif data["code"] == 72:
+                    postFile = data["offFileHash"]
+                    for key, val in postFile.items():
+                        await asyncio.create_task(
+                            self.transferFile(key, val, client_socket, hashtoInfo[key])
+                        )
         except Exception as e:
-            print("Error with client:", e)
             # 检查是否有异常失联
+            print("Error with client:", e)
+
         finally:
             self.nameTosocket.pop(username, None)
             client_socket.close()
