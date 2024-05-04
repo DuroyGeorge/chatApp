@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from FileManager import FileManager
 from Format import Format
 import asyncio
@@ -188,6 +189,26 @@ class Server:
                 while True:
                     data = await f.read(16 * 1024)
                     if not data:
+                        # 删除记录
+                        lock_del = await self.fileManager.get_lock("compFileTable")
+                        async with lock_del:
+                            async with aiofiles.open("compFileTable", "r") as f:
+                                lines = await f.readlines()
+                                modi_lines = []
+                                for line in lines:
+                                    line_sp = line.split()
+                                    if (
+                                        line_sp[0] == info["fromUser"]
+                                        and line_sp[1] == info["toUser"]
+                                        and line_sp[2] == info["filename"]
+                                        and line_sp[3] == info["hash"]
+                                    ):
+                                        continue
+                                    modi_lines.append(" ".join(line_sp))
+                            async with aiofiles.open("compFileTable", "w") as f:
+                                await f.writelines(modi_lines)
+                            # 删除文件
+                            os.remove(f"./files/{hash}")
                         break
                     try:
                         temp = {"code": 70, "length": len(data)} | info
