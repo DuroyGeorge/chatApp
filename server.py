@@ -467,6 +467,14 @@ class Server:
                     self.audio_fromTo[data["toUser"]] = username
                 elif data["code"] == 85:
                     self.audio_fromTo[data["toUser"]] = username
+                elif data["code"] == 86:
+                    # 断开连接
+                    temp = self.audio_nameToaddr.pop(username)
+                    self.audio_nameToaddr.pop(temp)
+                    self.audio_fromTo.pop(username)
+                    await asyncio.get_running_loop().sock_sendall(
+                        self.nameTosocket[data["toUser"]], Format(data).toBytes()
+                    )
 
         except Exception as e:
             # 检查是否有异常失联
@@ -504,6 +512,11 @@ class Server:
                     data_dict = json.loads(data)
                     self.audio_nameToaddr[data_dict["fromUser"]] = addr
                     self.audio_addrToname[addr] = data_dict["fromUser"]
+                    if data_dict["toUser"] in self.nameTosocket:
+                        await asyncio.get_running_loop().sock_sendall(
+                            self.nameTosocket[data_dict["toUser"]],
+                            Format({"addr": addr}).toBytes(),
+                        )
                 except:
                     try:
                         await asyncio.get_running_loop().sock_sendto(
