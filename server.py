@@ -480,6 +480,7 @@ class Server:
 
     async def serve(self):
         try:
+            print(f"Server is running...{self.server_socket.getsockname()}")
             while True:
                 client_socket, addr = await asyncio.get_running_loop().sock_accept(
                     self.server_socket
@@ -492,8 +493,9 @@ class Server:
         finally:
             self.server_socket.close()
 
-    async def audio_server(self):
+    async def audio_serve(self):
         try:
+            print(f"Server is running...{self.audio_socket.getsockname()}")
             while True:
                 data, addr = await asyncio.get_running_loop().sock_recvfrom(
                     self.audio_socket, 4096
@@ -517,7 +519,9 @@ class Server:
         finally:
             self.audio_socket.close()
 
+    async def start(self):
+        await asyncio.gather(self.serve(), self.audio_serve())
+
     def run(self):
-        print(f"Server is running...{self.server_socket.getsockname()}")
-        asyncio.run(self.serve())
+        asyncio.run(self.start())
         print("Server closed")

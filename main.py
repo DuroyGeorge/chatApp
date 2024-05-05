@@ -9,7 +9,6 @@ def main():
     server_socket.setblocking(False)
     audio_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     audio_server.bind(("localhost", 8766))
-    audio_server.listen()
     audio_server.setblocking(False)
     Server(server_socket, audio_server).run()
 
