@@ -7,7 +7,11 @@ def main():
     server_socket.bind(("localhost", 8765))
     server_socket.listen()
     server_socket.setblocking(False)
-    Server(server_socket).run()
+    audio_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    audio_server.bind(("localhost", 8766))
+    audio_server.listen()
+    audio_server.setblocking(False)
+    Server(server_socket, audio_server).run()
 
 
 if __name__ == "__main__":

@@ -9,10 +9,14 @@ import aiofiles
 
 class Server:
 
-    def __init__(self, server_socket) -> None:
+    def __init__(self, server_socket, audio_socket) -> None:
         self.nameTosocket = {}
         self.socketToname = {}
+        self.audio_nameToaddr = {}
+        self.audio_addrToname = {}
+        self.audio_fromTo = {}
         self.server_socket = server_socket
+        self.audio_socket = audio_socket
         self.fileManager = FileManager()
         self.serve_dict = {
             1: self.register,
@@ -91,33 +95,33 @@ class Server:
     async def onFileTrans(self, data, body):
         # 在线
         try:
-            await asyncio.get_event_loop().sock_sendall(
+            await asyncio.get_running_loop().sock_sendall(
                 self.nameTosocket[data["toUser"]], Format(data).toBytes() + body
             )
         except:
             # 接收方掉线
             try:
                 temp = {"code": 61}
-                await asyncio.get_event_loop().sock_sendall(
+                await asyncio.get_running_loop().sock_sendall(
                     self.nameTosocket[data["fromUser"]], Format(temp).toBytes()
                 )
             except:
                 # 发送方掉线
                 temp = {"code": 61}
-                await asyncio.get_event_loop().sock_sendall(
+                await asyncio.get_running_loop().sock_sendall(
                     self.nameTosocket[data["toUser"]], Format(temp).toBytes()
                 )
                 raise
         try:
             # 成功发送
             temp = {"code": 60}
-            await asyncio.get_event_loop().sock_sendall(
+            await asyncio.get_running_loop().sock_sendall(
                 self.nameTosocket[data["fromUser"]], Format(temp).toBytes()
             )
         except:
             # 发送方掉线
             temp = {"code": 61}
-            await asyncio.get_event_loop().sock_sendall(
+            await asyncio.get_running_loop().sock_sendall(
                 self.nameTosocket[data["toUser"]], Format(temp).toBytes()
             )
             raise
@@ -140,7 +144,7 @@ class Server:
         try:
             # 成功发送
             temp = {"code": 70}
-            await asyncio.get_event_loop().sock_sendall(
+            await asyncio.get_running_loop().sock_sendall(
                 self.nameTosocket[data["fromUser"]], Format(temp).toBytes()
             )
         except:
@@ -216,19 +220,19 @@ class Server:
                             temp["complete"] = True
                         else:
                             temp["complete"] = False
-                        await asyncio.get_event_loop().sock_sendall(
+                        await asyncio.get_running_loop().sock_sendall(
                             client_socket, Format(temp).toBytes() + data
                         )
                     except:
                         raise
 
     async def receive(self, client_socket):
-        data = await asyncio.get_event_loop().sock_recv(client_socket, 4)
+        data = await asyncio.get_running_loop().sock_recv(client_socket, 4)
         if not data:
             # 异常失联
             return data
         length = int.from_bytes(data, "big")
-        data = await asyncio.get_event_loop().sock_recv(client_socket, length)
+        data = await asyncio.get_running_loop().sock_recv(client_socket, length)
         if not data:
             # 异常失联
             return data
@@ -252,7 +256,7 @@ class Server:
                         res_dict["code"] = 11
                     else:
                         res_dict["code"] = 10
-                    await asyncio.get_event_loop().sock_sendall(
+                    await asyncio.get_running_loop().sock_sendall(
                         client_socket, Format(res_dict).toBytes()
                     )
                 elif data["code"] == 2:
@@ -263,7 +267,7 @@ class Server:
                         self.nameTosocket[username] = client_socket
                         self.socketToname[client_socket] = username
                         res_dict["code"] = 20
-                    await asyncio.get_event_loop().sock_sendall(
+                    await asyncio.get_running_loop().sock_sendall(
                         client_socket, Format(res_dict).toBytes()
                     )
                     # 检查离线文件
@@ -293,7 +297,7 @@ class Server:
                                     }
                     if not offFileHash:
                         temp = {"code": 72, "offFileHash": offFileHash}
-                        await asyncio.get_event_loop().sock_sendall(
+                        await asyncio.get_running_loop().sock_sendall(
                             client_socket, Format(temp).toBytes()
                         )
                 elif data["code"] == 3:
@@ -302,14 +306,14 @@ class Server:
                     else:
                         res_dict["code"] = 30
                         res_dict["message"] = data["message"]
-                    await asyncio.get_event_loop().sock_sendall(
+                    await asyncio.get_running_loop().sock_sendall(
                         client_socket, Format(res_dict).toBytes()
                     )
                 elif data["code"] == 4:
                     res_dict["code"] = 40
                     res_dict["message"] = data["message"]
                     for user in self.nameTosocket:
-                        await asyncio.get_event_loop().sock_sendall(
+                        await asyncio.get_running_loop().sock_sendall(
                             self.nameTosocket[user], Format(res_dict).toBytes()
                         )
                 elif data["code"] == 5:
@@ -320,16 +324,16 @@ class Server:
                         # 文件在线发送
                         res_dict["code"] = 50
                     res_dict["seg_num"] = res["sege_num"]
-                    await asyncio.get_event_loop().sock_sendall(
+                    await asyncio.get_running_loop().sock_sendall(
                         self.nameTosocket[username], Format(res_dict).toBytes()
                     )
                 elif data["code"] == 6:
-                    body = await asyncio.get_event_loop().sock_recv(
+                    body = await asyncio.get_running_loop().sock_recv(
                         client_socket, data["length"]
                     )
                     await self.onFileTrans(data, body)
                 elif data["code"] == 7:
-                    body = await asyncio.get_event_loop().sock_recv(
+                    body = await asyncio.get_running_loop().sock_recv(
                         client_socket, data["length"]
                     )
                     await self.offFileTrans(data, receiveFile, body)
@@ -384,28 +388,134 @@ class Server:
                         await asyncio.create_task(
                             self.transferFile(key, val, client_socket, hashtoInfo[key])
                         )
+                elif data["code"] == 8:
+                    # 语言聊天请求
+                    if data["toUser"] in self.nameTosocket:
+                        try:
+                            await asyncio.get_running_loop().sock_sendall(
+                                self.nameTosocket[data["toUser"]],
+                                Format(data).toBytes(),
+                            )
+                        except:
+                            res_dict["code"] = 82
+                            await asyncio.get_running_loop().sock_sendall(
+                                client_socket, Format(res_dict).toBytes()
+                            )
+
+                    else:
+                        res_dict["code"] = 81
+                        await asyncio.get_running_loop().sock_sendall(
+                            client_socket, Format(res_dict).toBytes()
+                        )
+                elif data["code"] == 80:
+                    # 语音聊天同意
+                    if data["res"] == True:
+                        if data["toUser"] in self.nameTosocket:
+                            try:
+                                await asyncio.get_running_loop().sock_sendall(
+                                    self.nameTosocket[data["toUser"]],
+                                    Format(data).toBytes(),
+                                )
+                            except:
+                                res_dict["code"] = 82
+                                await asyncio.get_running_loop().sock_sendall(
+                                    client_socket,
+                                    Format(res_dict).toBytes(),
+                                )
+                        else:
+                            res_dict["code"] = 82
+                            await asyncio.get_running_loop().sock_sendall(
+                                client_socket, Format(res_dict).toBytes()
+                            )
+                    else:
+                        try:
+                            await asyncio.get_running_loop().sock_sendall(
+                                self.nameTosocket[data["toUser"]],
+                                Format(data).toBytes(),
+                            )
+                        except:
+                            res_dict["code"] = 82
+                            await asyncio.get_running_loop().sock_sendall(
+                                client_socket,
+                                Format(res_dict).toBytes(),
+                            )
+                elif data["code"] == 83:
+                    # 通知对方建立连接
+                    try:
+                        await asyncio.get_running_loop().sock_sendall(
+                            self.nameTosocket[data["toUser"]],
+                            Format(data).toBytes(),
+                        )
+                    except:
+                        res_dict["code"] = 82
+                        await asyncio.get_running_loop().sock_sendall(
+                            client_socket,
+                            Format(res_dict).toBytes(),
+                        )
+                elif data["code"] == 84:
+                    try:
+                        await asyncio.get_running_loop().sock_sendall(
+                            self.nameTosocket[data["toUser"]],
+                            Format(data).toBytes(),
+                        )
+                    except:
+                        res_dict["code"] = 82
+                        await asyncio.get_running_loop().sock_sendall(
+                            client_socket,
+                            Format(res_dict).toBytes(),
+                        )
+                    self.audio_fromTo[data["toUser"]] = username
+                elif data["code"] == 85:
+                    self.audio_fromTo[data["toUser"]] = username
+
         except Exception as e:
             # 检查是否有异常失联
             print("Error with client:", e)
 
         finally:
-            self.nameTosocket.pop(username, None)
+            temp = self.nameTosocket.pop(username, None)
+            self.socketToname.pop(temp, None)
             client_socket.close()
             print(f"Disconnected {addr}")
 
     async def serve(self):
         try:
             while True:
-                client_socket, addr = await asyncio.get_event_loop().sock_accept(
+                client_socket, addr = await asyncio.get_running_loop().sock_accept(
                     self.server_socket
                 )
                 temp_dict = {"code": 0}
-                await asyncio.get_event_loop().sock_sendall(
+                await asyncio.get_running_loop().sock_sendall(
                     client_socket, Format(temp_dict).toBytes()
                 )
                 asyncio.create_task(self.client_handler(client_socket, addr))
         finally:
             self.server_socket.close()
+
+    async def audio_server(self):
+        try:
+            while True:
+                data, addr = await asyncio.get_running_loop().sock_recvfrom(
+                    self.audio_socket, 4096
+                )
+                try:
+                    data_dict = json.loads(data)
+                    self.audio_nameToaddr[data_dict["fromUser"]] = addr
+                    self.audio_addrToname[addr] = data_dict["fromUser"]
+                except:
+                    try:
+                        await asyncio.get_running_loop().sock_sendto(
+                            self.audio_socket,
+                            data,
+                            self.audio_nameToaddr[
+                                self.audio_fromTo[self.audio_addrToname[addr]]
+                            ],
+                        )
+                    except:
+                        pass
+
+        finally:
+            self.audio_socket.close()
 
     def run(self):
         print(f"Server is running...{self.server_socket.getsockname()}")
